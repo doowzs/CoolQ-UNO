@@ -1,15 +1,14 @@
-## CQ UNO插件（开发中）
+## CQ UNO Plugin (in working)
 
-### 目标功能
+### BASIC FUNCTION
 
-- 用文本交互实现基本的UNO游戏
-- 管理员控制台
-- 观战功能（后续加入）
-- 积分累计
-- 挂机检测
-- 其他待定
+- Basic UNO game based on text interface
+- Admin control
+- Points calculating for games
+- Watching mode (maybe)
+- etc., etc.
 
-### 开发进度
+### Progress
 
-0%。肛肛开始工作。
+Presently 0%. (Just started working on it.)
 Find me at [CoolQ-UNO](https://github.com/doowzs/CoolQ-UNO).
