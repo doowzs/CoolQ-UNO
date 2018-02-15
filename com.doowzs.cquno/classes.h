@@ -113,7 +113,10 @@ public:
 	static wstring readDataType();
 	static bool writeDataType();
 	static bool backupData(int64_t playNum);
-	static bool isDrawToDieEnabled();
+
+	//读取额外的规则
+	static bool isFreeDrawEnabled();
+	static bool isCrazyDrawEnabled();
 	static bool isRegressiveEnabled();
 	static bool isSevenOEnabled();
 	static bool isJumpInEnabled();
@@ -160,6 +163,10 @@ public:
 	Desk();
 	int turn;
 	int isClockwise;			//存储当前出牌顺序是顺时针（1）还是逆时针（-1）
+	int damageCount;
+	bool isLegalWDF;
+	int64_t lastWDFPlayer;
+
 	int64_t lastTime;
 	vector<wstring> cards;
 	int64_t number;				//桌号
@@ -203,8 +210,10 @@ public:
 
 	void at(int64_t playNum); 
 	int getPlayer(int64_t number);					//按qq号获得玩家得索引
-	void setNextPlayerIndex(bool skipNext);			//设置下个出牌得玩家索引
+	void setNextPlayerIndex(bool skipNext, bool getCards);	//设置下个出牌得玩家索引
 	bool ableToPlay(int64_t playNum);				//判断能否出牌，不能出牌则摸牌
+	bool ableToPlay_NoWDF(int64_t playNum);			//判断除了+4能否出牌
+	bool ableToDamage(int64_t playNum);				//判断能否增加伤害
 	void drawCards(int64_t playNum, int amount);	//摸牌
 	void listPlayers(int type);
 	bool isCanWin(int cardCount, vector<int> *Weights, wstring type);
@@ -224,6 +233,7 @@ public:
 	int getWatcher(int64_t number);						//按qq号获得玩家得索引
 
 	void checkAFK();
+	void WDFHandle(int64_t playNum, int64_t WDFNum, bool notSuccess);
 };
 
 class Desks {

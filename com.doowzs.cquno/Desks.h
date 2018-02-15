@@ -26,9 +26,10 @@ Desk::Desk() {
 	this->currentPlayIndex = -1;			//该谁出牌
 
 	vector<wstring> lastCard;				//上位玩家的牌
-	//this->lastCardType = L"";				//上位玩家得牌类
+	this->lastWDFPlayer = 0;
+	this->damageCount = 0;
 
-	this->whoIsWinner = 0;
+	this->whoIsWinner = -1;
 	this->turn = 0;
 	this->isClockwise = 1;
 	this->lastTime = 0;						//最后一次发牌时间，记录用
@@ -70,12 +71,45 @@ void Desk::listPlayers(int type)
 		this->msg << ENDL;
 	}
 
-	for (unsigned i = 0; i < this->players.size(); i++) {
-		this->msg << i + 1 << L"：";
+	if (hasWin) {
+		vector<int> scores;
+		int winScore = 0;
+		for (unsigned i = 0; i < this->players.size(); i++) {
+			scores.push_back(0);
+			if (i != this->whoIsWinner) {
+				for (unsigned j = 0; j < this->players[i]->card.size(); j++) {
+					if (Util::findFlag(this->players[i]->card[j]) >= 100) {		//黑牌
+						scores[i] -= 50;
+						continue;
+					}
+					if (Util::findFlag(this->players[i]->card[j]) % 25 >= 19) {	//功能牌
+						scores[i] -= 20;
+						continue;
+					}
+					scores[i] -= (Util::findFlag(this->players[i]->card[j]) % 25 + 1) / 2;	//数字牌
+				}
+			}
+			winScore += -scores[i];			//赢家获得正分
+		}
+		scores[whoIsWinner] = winScore;
 
-		this->at(this->players[i]->number);
-		this->msg << L"还没做好呢！" << this->turn;
-		this->msg << ENDL;
+		for (unsigned i = 0; i < this->players.size(); i++) {
+			this->msg << i + 1 << L"：";
+			this->at(this->players[i]->number);
+			this->msg << L"[" << (i==this->whoIsWinner? L"胜利" : L"失败")
+				<< scores[i] << L"分]" << ENDL;
+			Admin::addScore(this->players[i]->number, scores[i]);
+		}
+		return;
+	}
+	else {
+		for (unsigned i = 0; i < this->players.size(); i++) {
+			this->msg << i + 1 << L"：";
+			this->at(this->players[i]->number);
+			this->msg << L"：" << this->players[i]->card.size();
+			this->msg << ENDL;
+		}
+		return;
 	}
 }
 
@@ -125,10 +159,11 @@ void Desk::play(int64_t playNum, wstring msg)
 	int playIndex = this->getPlayer(playNum);
 	int length = msg.length();
 
-	if (playIndex == -1 || playIndex != this->currentPlayIndex
+	//由于有抢牌的可能性，这里不判断是否是当前玩家，而是留到下一个函数判断
+	if (playIndex == -1
 		|| (!(this->state == STATE_GAMING && this->turn > 0)
 			&& !(this->state == STATE_READYTOGO && this->turn == 0))
-		|| length < 2) {
+		|| length <= 2) {	//消息长度必须大于2（出+牌）
 		return;
 	}
 
@@ -153,8 +188,6 @@ void Desk::play(int64_t playNum, wstring msg)
 		}
 		
 		msglist.push_back(color + face);
-		this->msg << L"识别结果：" << color + face;
-		this->sendMsg(this->subType);
 	}
 
 	this->play(msglist, playIndex);
@@ -162,6 +195,15 @@ void Desk::play(int64_t playNum, wstring msg)
 
 void Desk::play(vector<wstring> list, int playIndex)
 {
+	//完全一致，抢牌（第一次出牌肯定不能实现）
+	if (this->turn > 0 && list[0] == this->lastCard[0]) {
+		this->currentPlayIndex = playIndex;
+	}
+
+	//抢牌不成功或非当前玩家，终止执行
+	if (playIndex != this->currentPlayIndex) {
+		return;
+	}
 
 	Player *player = this->players[playIndex];
 	vector<wstring> mycardTmp(player->card);
@@ -180,16 +222,25 @@ void Desk::play(vector<wstring> list, int playIndex)
 	//判断出牌是否合法
 	bool isLegalPlay = false;
 
-	if (((this->turn == 0 || this->lastCard.empty())						//首次出牌
-			|| list[0].substr(0, 1) == this->lastCard[0].substr(0, 1)		//相同颜色
-			|| list[0].substr(1, 1) == this->lastCard[0].substr(1, 1)		//相同数字
-			|| list[0].substr(0, 2) == L"变色"								//出黑牌
-			|| list[0].substr(0, 2) == L"+4"
-			|| ((this->lastCard[0].substr(0, 1) == L"X" || this->lastCard[0].substr(0, 1) == L"Y")
-				&& list[0].substr(0, 1) == this->lastCard[0].substr(1, 1)))	//变色后出牌
-		&& (cardCount == 1 || 
-			(cardCount == 2 && list[0] == list[1]))) {
+	this->lastWDFPlayer = 0;
+	this->isLegalWDF = !this->ableToPlay_NoWDF(this->players[playIndex]->number);
+
+	if ((this->turn == 0													//首次出牌
+		|| list[0].substr(0, 1) == this->lastCard[0].substr(0, 1)		//相同颜色
+		|| list[0].substr(1, 1) == this->lastCard[0].substr(1, 1)		//相同数字
+		|| list[0].substr(0, 2) == L"变色"								//出黑牌
+		|| list[0].substr(0, 2) == L"+4"
+		|| (this->lastCard[0].substr(0, 1) == L"Z"
+			&& list[0].substr(0, 1) == this->lastCard[0].substr(1, 1)))	//变色后出牌
+		&& (cardCount == 1 ||
+		(cardCount == 2 && list[0] == list[1]))) {
 		isLegalPlay = true;
+	}
+
+	if (this->damageCount > 0
+		&& (list[0].substr(0, 1) != L"+" && list[0].substr(1, 1) != L"跳"
+			&& list[0].substr(1, 1) != L"+" && list[0].substr(1, 1) != L"反")) {
+		isLegalPlay = false;
 	}
 	
 	if (isLegalPlay) {
@@ -197,9 +248,6 @@ void Desk::play(vector<wstring> list, int playIndex)
 			this->state = STATE_GAMING;
 		}
 
-		//记录出牌时间
-		time_t rawtime;
-		this->lastTime = time(&rawtime);
 		//防止提示后出牌出现bug
 		this->warningSent = false;
 
@@ -261,9 +309,9 @@ void Desk::play(vector<wstring> list, int playIndex)
 			this->msg << L"：" << static_cast<int>(this->players[i]->card.size());
 			this->msg << ENDL;
 		}
-		this->msg << ENDL;
 
 		if (list[0] == L"变色") {
+			this->msg << L"---------------" << ENDL;
 			this->at(this->players[this->currentPlayIndex]->number);
 			this->msg << L"请选择颜色。";
 			this->lastCard[0] = L"X" + this->lastCard[0].substr(1,1);
@@ -271,6 +319,9 @@ void Desk::play(vector<wstring> list, int playIndex)
 		}
 
 		if (list[0] == L"+4") {
+			this->lastWDFPlayer = this->players[this->currentPlayIndex]->number;
+
+			this->msg << L"---------------" << ENDL;
 			this->at(this->players[this->currentPlayIndex]->number);
 			this->msg << L"请选择颜色。";
 			this->lastCard[0] = L"Y" + this->lastCard[0].substr(1, 1);
@@ -278,35 +329,46 @@ void Desk::play(vector<wstring> list, int playIndex)
 		}
 		
 		if (list[0].substr(1, 2) == L"+2") {
-			this->setNextPlayerIndex(false);
-			this->drawCards(this->players[this->currentPlayIndex]->number, 2);
-			this->setNextPlayerIndex(false);
+			this->damageCount += 2;
+			this->msg << L"累计：" << this->damageCount << ENDL;
+			this->setNextPlayerIndex(false, true);
 			return;
 		}
 		
 		if (list[0].substr(1, 2) == L"跳过") {
-			this->setNextPlayerIndex(true);
+			if (this->damageCount == 0) {
+				this->setNextPlayerIndex(true, false);
+			}
+			else {
+				this->setNextPlayerIndex(false, true);
+			}
 			return;
 		}
 
 		if (list[0].substr(1, 2) == L"反转") {
-			if (this->players.size() == 2) {
-				this->setNextPlayerIndex(true);
-				return;
+			if (this->damageCount == 0) {
+				if (this->players.size() == 2) {
+					this->setNextPlayerIndex(true, false);
+					return;
+				}
+				else {
+					this->isClockwise = 0 - this->isClockwise;
+				}
 			}
 			else {
 				this->isClockwise = 0 - this->isClockwise;
+				this->setNextPlayerIndex(false, true);
 			}
 		}
 
-		//打出0：所有人按顺序交换手牌
+		//打出0：所有人按顺序交换手牌，有问题，待重写
 		if (Admin::isSevenOEnabled() && list[0].substr(1, 1) == L"0") {
-			for (unsigned i = 0; i < this->cards.size(); i++) {
-				swap(this->players[i]->card, this->players[(i + 1) % this->players.size()]->card);
-			}
+		}
+		//打出7：与指定玩家交换手牌
+		if (Admin::isSevenOEnabled() && list[0].substr(1, 1) == L"7") {
 		}
 
-		this->setNextPlayerIndex(false);
+		this->setNextPlayerIndex(false, false);
 	}
 	else {
 		this->at(this->players[this->currentPlayIndex]->number);
@@ -317,20 +379,28 @@ void Desk::play(vector<wstring> list, int playIndex)
 }
 
 void Desk::changeColor(int64_t playNum, wstring color) {
+	//非法操作，退出
+	if (playNum != this->players[this->currentPlayIndex]->number) {
+		return;
+	}
+
 	this->at(this->players[currentPlayIndex]->number);
-	this->msg << L"选择" << color << L"色，";
+	this->msg << L"选择" << color << L"色。" << ENDL;
 	this->lastCard[0] = this->lastCard[0].substr(0, 1) + color;
 
 	//先转发再设置下一个玩家
 	this->sendWatchingMsg_ChangeColor();
 
 	if (this->lastCard[0].substr(0, 1) == L"X") {
-		this->setNextPlayerIndex(false);
+		this->lastCard[0] = L"Z" + color;
+		this->setNextPlayerIndex(false, false);
+		return;
 	}
-	else if (this->lastCard[0].substr(0, 1) == L"Y") {
-		this->setNextPlayerIndex(false);
-		this->drawCards(this->players[this->currentPlayIndex]->number, 4);
-		this->setNextPlayerIndex(false);
+	if (this->lastCard[0].substr(0, 1) == L"Y") {
+		this->damageCount += 4;
+		this->msg << L"累计" << this->damageCount << ENDL;
+		this->setNextPlayerIndex(false, true);
+		return;
 	}
 }
 
@@ -347,9 +417,6 @@ void Desk::surrender(int64_t playNum)
 		return;
 	}
 
-	//记录弃牌时间
-	time_t rawtime;
-	this->lastTime = time(&rawtime);
 	//防止提示后弃牌出现bug
 	this->warningSent = false;
 
@@ -365,14 +432,15 @@ void Desk::surrender(int64_t playNum)
 		}
 	}
 	if (alivePlayerCount > 1) {
-		this->whoIsWinner = 0;
+		this->whoIsWinner = -1;
 	}
 
-	if (this->whoIsWinner > 0) {
+	if (this->whoIsWinner >= 0) {
 		this->sendWatchingMsg_Over();
 
 		this->msg << L"游戏结束，";
-		this->msg << ENDL;
+		this->at(this->players[this->whoIsWinner]->number);
+		this->msg << L"赢了。" << ENDL;
 
 		this->msg << L"---------------";
 		this->msg << ENDL;
@@ -389,7 +457,7 @@ void Desk::surrender(int64_t playNum)
 		this->at(playNum);
 		this->msg << L"弃牌，";
 
-		this->setNextPlayerIndex(false);
+		this->setNextPlayerIndex(false, false);
 	}
 	else {
 		this->at(playNum);
@@ -445,20 +513,64 @@ void Desks::gameOver(int64_t number)
 	casino.desks.erase(it);
 }
 
-void Desk::setNextPlayerIndex(bool skipNext)
+void Desk::setNextPlayerIndex(bool skipNext, bool getCards)
 {
-	this->currentPlayIndex = (this->currentPlayIndex + 1*this->isClockwise) % this->players.size();
+	//记录时间
+	time_t rawtime;
+	this->lastTime = time(&rawtime);
 
-	//如果下一个该出牌的玩家正好弃牌了，则重新set下一位玩家
-	if (skipNext || this->players[this->currentPlayIndex]->isSurrender) {
-		this->setNextPlayerIndex(false);
-	}
+	this->currentPlayIndex = (this->currentPlayIndex + 1*this->isClockwise 
+		+ this->players.size()) % this->players.size();
 
-	//如果下一个该出牌的玩家将要出牌，且没有能出的牌，则自动摸牌。
-	if (!skipNext && !this->ableToPlay(this->players[this->currentPlayIndex]->number)) {
-		//this->drawCards(this->players[this->currentPlayIndex]->number, 0);
+	this->msg << L"---------------" << ENDL;
+	this->msg << L"[" << this->lastCard[0] << L"]";
+
+	//如果下一个该出牌的玩家被跳过，则重新set下一位玩家
+	if (skipNext) {
 		this->at(this->players[this->currentPlayIndex]->number);
-		this->msg << L"你没有可以出的牌，请摸牌！" << ENDL;
+		this->msg << L"跳过。" << ENDL;
+		this->setNextPlayerIndex(false, false);
+		return;
+	}
+	//如果下一个玩家弃牌，直接跳过
+	if (this->players[this->currentPlayIndex]->isSurrender) {
+		this->setNextPlayerIndex(false, false);
+		return;
+	}
+	//如果叠加摸牌
+	if (this->damageCount > 0) {
+		if (this->lastWDFPlayer > 0) {
+			//上一个人+4
+			this->msg << L"现在轮到";
+			this->at(this->players[this->currentPlayIndex]->number);
+			this->msg << L"，你可以质疑或者摸牌！" << ENDL;
+			return;
+		}
+		else {
+			if (!this->ableToDamage(this->players[this->currentPlayIndex]->number)) {
+				//普通叠加，无牌
+				this->msg << L"现在轮到";
+				this->at(this->players[this->currentPlayIndex]->number);
+				this->msg << L"，没有可以出的牌，系统自动摸牌！" << ENDL;
+				this->drawCards(this->players[this->currentPlayIndex]->number, this->damageCount);
+				return;
+			}
+			else {
+				//普通叠加，有牌
+				this->msg << L"现在轮到";
+				this->at(this->players[this->currentPlayIndex]->number);
+				this->msg << L"，你可以叠加或转移或摸牌！" << ENDL;
+				return;
+			}
+		}
+	}
+	//如果下一个该出牌的玩家将要出牌，且没有能出的牌，则自动摸牌。
+	if (this->damageCount == 0 && !this->ableToPlay(this->players[this->currentPlayIndex]->number)) {
+		this->msg << L"现在轮到";
+		this->at(this->players[this->currentPlayIndex]->number);
+		this->msg << L"，没有可以出的牌，系统自动摸牌！" << ENDL;
+		this->drawCards(this->players[this->currentPlayIndex]->number, 0);
+		return;
 	}
 
 	this->msg << L"现在轮到";
@@ -470,15 +582,52 @@ void Desk::setNextPlayerIndex(bool skipNext)
 bool Desk::ableToPlay(int64_t playNum) {
 	int index = this->getPlayer(playNum);
 
-	if (this->turn == 0 || this->lastCard.empty()) return true;
+	if (this->turn == 0) return true;
 
 	for (unsigned i = 0; i < this->players[index]->card.size(); i++) {
 		if (this->players[index]->card[i].substr(0, 1) == this->lastCard[0].substr(0, 1)			//相同颜色
 			|| this->players[index]->card[i].substr(1, 1) == this->lastCard[0].substr(1, 1)			//相同数字
-			|| this->players[index]->card[i].substr(0, 2) == L"变色"														//出黑牌
+			|| this->players[index]->card[i].substr(0, 2) == L"变色"									//出黑牌
 			|| this->players[index]->card[i].substr(0, 2) == L"+4"
-			|| ((this->lastCard[0].substr(0, 1) == L"X" || this->lastCard[0].substr(0, 1) == L"Y")
-				&& this->players[index]->card[i].substr(0, 1) == this->lastCard[0].substr(1, 1))){//变色后出牌
+			|| (this->lastCard[0].substr(0, 1) == L"Z"
+				&& this->players[index]->card[i].substr(0, 1) == this->lastCard[0].substr(1, 1))) {	//变色后出牌
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool Desk::ableToPlay_NoWDF(int64_t playNum) {
+	int index = this->getPlayer(playNum);
+
+	if (this->turn == 0) return true;
+
+	for (unsigned i = 0; i < this->players[index]->card.size(); i++) {
+		if (this->players[index]->card[i].substr(0, 1) == this->lastCard[0].substr(0, 1)			//相同颜色
+			|| this->players[index]->card[i].substr(1, 1) == this->lastCard[0].substr(1, 1)			//相同数字
+			|| this->players[index]->card[i].substr(0, 2) == L"变色"									//出黑牌
+			|| (this->lastCard[0].substr(0, 1) == L"Z"
+				&& this->players[index]->card[i].substr(0, 1) == this->lastCard[0].substr(1, 1))) {	//变色后出牌
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool Desk::ableToDamage(int64_t playNum) {
+	int index = this->getPlayer(playNum);
+
+	if (this->turn == 0) return true;
+
+	for (unsigned i = 0; i < this->players[index]->card.size(); i++) {
+		if ((this->players[index]->card[i].substr(0, 1) == L"+")
+			|| (this->lastCard[0].substr(0, 1) == L"Y"
+				|| this->players[index]->card[i].substr(0, 1) == this->lastCard[0].substr(0, 1))
+				&&	 (this->players[index]->card[i].substr(1, 1) == L"+"
+					|| this->players[index]->card[i].substr(1, 1) == L"跳"
+					|| this->players[index]->card[i].substr(1, 1) == L"反")) {
 			return true;
 		}
 	}
@@ -488,12 +637,52 @@ bool Desk::ableToPlay(int64_t playNum) {
 
 void Desk::drawCards(int64_t playNum, int amount) {
 	int index = this->getPlayer(playNum);
-	int count = 0;
+
+	//非自己的回合不能摸牌
+	if (index != this->currentPlayIndex) return;
+	
+	int count = 0; 
 
 	if (amount == 0) {
-		while (!this->ableToPlay(playNum)) {
-			count++; 
-			this->players[index]->card.push_back(this->cards.front());
+		wstring lastGot;	//记录最后一张牌，一定是可以打出的
+		if (Admin::isCrazyDrawEnabled()) {
+			//摸到爽
+			while (!this->ableToPlay(playNum)) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+				if (this->cards.empty()) {
+					this->msg << L"牌库空了，游戏结束。" << ENDL;
+					casino.gameOver(this->number);
+				}
+
+				count++;
+				lastGot = this->cards.front();
+				this->players[index]->card.push_back(lastGot);
+				this->cards.erase(this->cards.begin());
+
+				sort(this->players[index]->card.begin(), this->players[index]->card.end(), Util::compareCard);
+
+				for (unsigned m = 0; m < this->players[index]->card.size(); m++) {
+					this->players[index]->msg << L"[" << this->players[index]->card.at(m) << L"]";
+				}
+				this->players[index]->msg << ENDL;
+				this->sendPlayerMsg();
+			}
+			this->at(playNum);
+			this->msg << L"共摸了" << count << L"张，手牌总数"
+				<< this->players[index]->card.size() << L"张。" << ENDL;
+			this->sendPlayerMsg();
+		}
+		else {
+			//不摸到爽的情况下，只摸一张牌，如果不能出就跳过
+			if (this->cards.empty()) {
+				this->msg << L"牌库空了，游戏结束。" << ENDL;
+				casino.gameOver(this->number);
+			}
+
+			count++;
+			lastGot = this->cards.front();
+			this->players[index]->card.push_back(lastGot);
 			this->cards.erase(this->cards.begin());
 
 			sort(this->players[index]->card.begin(), this->players[index]->card.end(), Util::compareCard);
@@ -503,14 +692,31 @@ void Desk::drawCards(int64_t playNum, int amount) {
 			}
 			this->players[index]->msg << ENDL;
 			this->sendPlayerMsg();
+
+			if (ableToPlay(playNum)) {
+				this->at(playNum);
+				this->msg << L"共摸了" << count << L"张，手牌总数"
+					<< this->players[index]->card.size() << L"张。" << ENDL;
+				this->sendPlayerMsg();
+			}
+			else {
+				this->at(playNum);
+				this->msg << L"共摸了" << count << L"张，手牌总数"
+					<< this->players[index]->card.size() << L"张，无法出牌，跳过。" << ENDL;
+				this->sendPlayerMsg();
+				this->setNextPlayerIndex(false, false);
+			}
 		}
-		this->at(playNum);
-		this->msg << L"摸牌结束。共摸了" << count << L"张，手牌总数"
-			<< this->players[index]->card.size() << L"张。" << ENDL;
-		this->sendPlayerMsg();
 	}
 	else {
 		for (int i = 0; i < amount; i++) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+			if (this->cards.empty()) {
+				this->msg << L"牌库空了，游戏结束。" << ENDL;
+				casino.gameOver(this->number);
+			}
+
 			count++;
 			this->players[index]->card.push_back(this->cards.front());
 			this->cards.erase(this->cards.begin());
@@ -524,9 +730,20 @@ void Desk::drawCards(int64_t playNum, int amount) {
 			this->sendPlayerMsg();
 		}
 		this->at(playNum);
-		this->msg << L"摸牌结束。共摸了" << count << L"张，手牌总数"
+		this->msg << L"共摸了" << count << L"张，手牌总数"
 			<< this->players[index]->card.size() << L"张。" << ENDL;
 		this->sendPlayerMsg();
+
+		//处理+4的信息
+		if (this->lastCard[0].substr(0, 1) == L"Y") {
+			this->lastCard[0] = L"Z" + this->lastCard[0].substr(1, 1);
+		}
+
+		//只有伤害摸牌才会自动到下一个人
+		if (this->damageCount > 0) {
+			this->damageCount = 0;
+			this->setNextPlayerIndex(false, false);
+		}
 	}
 }
 
@@ -546,9 +763,10 @@ void Desk::deal() {
 		sort(player->card.begin(), player->card.end(), Util::compareCard);
 
 		player->msg << L"当前额外规则" << ENDL
-			<< L"摸到爽：" << (Admin::isDrawToDieEnabled() ? L"启用" : L"禁用") << ENDL
-			<< L"伤害叠加：" << (Admin::isRegressiveEnabled() ? L"启用" : L"禁用") << ENDL
+			<< L"自摸：" << (Admin::isFreeDrawEnabled() ? L"启用" : L"禁用") << ENDL
+			<< L"摸到爽：" << (Admin::isCrazyDrawEnabled() ? L"启用" : L"禁用") << ENDL
 			<< L"0-7换牌：" << (Admin::isSevenOEnabled() ? L"启用" : L"禁用") << ENDL
+			<< L"伤害叠加：" << (Admin::isRegressiveEnabled() ? L"启用" : L"禁用") << ENDL
 			<< L"同种牌抢牌：" << (Admin::isJumpInEnabled() ? L"启用" : L"禁用") << ENDL;
 		this->sendPlayerMsg();
 
@@ -848,11 +1066,11 @@ void Desk::startGame() {
 		this->msg << L"---------------";
 		this->msg << ENDL;
 
-		this->listPlayers(1);
-
 		this->shuffle();
 
 		this->deal();
+
+		this->listPlayers(1);
 
 		this->state = STATE_READYTOGO;
 
@@ -906,14 +1124,14 @@ void Desk::checkAFK() {
 			this->warningSent = false;
 
 			this->at(this->players[this->currentPlayIndex]->number);
-			this->msg << L"挂机，惩罚2张牌";
+			this->msg << L"挂机，惩罚2张牌。";
 			this->msg << ENDL;
-			this->drawCards(this->players[this->currentPlayIndex]->number, 2);
-
 			this->msg << L"---------------";
 			this->msg << ENDL;
-			this->setNextPlayerIndex(false);
-			this->lastTime = timeNow;
+			this->damageCount += 2;
+
+			//摸牌后会自动过到下一位玩家
+			this->drawCards(this->players[this->currentPlayIndex]->number, this->damageCount);
 
 			this->sendMsg(this->subType);
 			this->msg.str(L"");
@@ -927,5 +1145,27 @@ void Desk::checkAFK() {
 			this->sendMsg(this->subType);
 			this->msg.str(L"");
 		}
+	}
+}
+
+void Desk::WDFHandle(int64_t playNum, int64_t WDFNum, bool notSuccess) {
+	Player* WDFIndex = this->players[this->getPlayer(WDFNum)];
+	this->at(WDFNum);
+	this->msg << L"的手牌为";
+	this->listCardsOnDesk(WDFIndex);
+	this->msg << ENDL;
+
+	if (!notSuccess) {
+		this->at(playNum);
+		this->msg << L"举报成功" << ENDL;
+		this->drawCards(WDFNum, this->damageCount);
+		return;
+	}
+	else {
+		this->at(playNum);
+		this->msg << L"举报失败" << ENDL;
+		this->damageCount += 2;
+		this->drawCards(WDFNum, this->damageCount);
+		return;
 	}
 }

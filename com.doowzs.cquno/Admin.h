@@ -199,9 +199,15 @@ bool Admin::writeVersion()
 	return WritePrivateProfileString(model.c_str(), key.c_str(), value.c_str(), DATA_PATH.c_str());
 }
 
-bool Admin::isDrawToDieEnabled() {
+bool Admin::isFreeDrawEnabled() {
 	wstring model = L"rule";
-	wstring key = L"drawtodie";
+	wstring key = L"freedraw";
+	return GetPrivateProfileInt(model.c_str(), key.c_str(), 0, CONFIG_PATH.c_str());
+}
+
+bool Admin::isCrazyDrawEnabled() {
+	wstring model = L"rule";
+	wstring key = L"crazydraw";
 	return GetPrivateProfileInt(model.c_str(), key.c_str(), 0, CONFIG_PATH.c_str());
 }
 

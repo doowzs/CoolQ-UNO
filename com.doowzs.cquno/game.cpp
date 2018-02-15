@@ -52,7 +52,12 @@ bool Desks::game(bool subType, int64_t deskNum, int64_t playNum, const char* msg
 		desk->join(playNum);
 	}
 	else if (desk->state >= STATE_READYTOGO
-		&& (desk->turn>0 && (desk->lastCard[0].substr(0, 1) == L"X"
+		&& (desk->turn > 0 && desk->lastWDFPlayer > 0
+		&& (msg.find(L"质疑") == 0))) {
+		desk->WDFHandle(playNum, desk->lastWDFPlayer, desk->isLegalWDF);
+	}
+	else if (desk->state >= STATE_READYTOGO
+		&& (desk->turn > 0 && (desk->lastCard[0].substr(0, 1) == L"X"
 			|| desk->lastCard[0].substr(0, 1) == L"Y"))			//第一回合vector为空会导致内存错误
 		&& (msg.find(L"绿") == 0 || msg.find(L"黄") == 0 || msg.find(L"红") == 0 || msg.find(L"蓝") == 0)) {
 		desk->changeColor(playNum, msg.substr(0, 1));
@@ -62,13 +67,23 @@ bool Desks::game(bool subType, int64_t deskNum, int64_t playNum, const char* msg
 		|| msg.find(L"变") == 0 || msg.find(L"+") == 0 || msg.find(L"＋") == 0)) {
 		desk->play(playNum, L"出" + msg);						//自动检测并补全
 	}
-	else if ((desk->state >= STATE_READYTOGO) &&
-		(msg.find(L"出") == 0 || msg.find(L"打") == 0)) {		//出牌阶段
+	else if ((desk->state >= STATE_READYTOGO)
+		&& (msg.find(L"出") == 0 || msg.find(L"打") == 0)) {		//正常出牌阶段
 		desk->play(playNum, msg);
 	}
 	else if ((desk->state >= STATE_READYTOGO) &&
 		(msg.find(L"摸") == 0)) {
-		desk->drawCards(playNum, 0);
+		if (desk->damageCount == 0) {
+			if (Admin::isFreeDrawEnabled()) {
+				desk->drawCards(playNum, 1);
+			}
+			else {
+				desk->msg << L"额外规则约定有牌可出不能摸牌！";
+			}
+		}
+		else {
+			desk->drawCards(playNum, desk->damageCount);
+		}
 	}
 	else if (msg.find(L"退桌") == 0 || msg.find(L"下桌") == 0
 		|| msg.find(L"不玩了") == 0) {	//结束游戏
